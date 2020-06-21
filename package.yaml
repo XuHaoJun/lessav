@@ -1,0 +1,81 @@
+name:                lessav
+version:             0.1.0.0
+github:              "xuhaojun/lessav"
+license:             BSD3
+author:              "xuhaojun"
+maintainer:          "example@example.com"
+copyright:           "2020 Author name here"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/xuhaojun/lessav#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- bytestring
+- http-conduit
+- tagsoup
+- directory 
+- process 
+- utf8-string
+- regex-tdfa
+- text
+- split
+- filepath
+- async
+- async-pool
+- SafeSemaphore
+- aeson
+- array
+- immortal-queue
+- stm
+- broadcast-chan
+- deepseq
+- deepseq-generics
+
+library:
+  source-dirs: src
+
+executables:
+  lessav-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - lessav
+
+  lessav-static:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -static
+    - -O2
+    cc-options: -static
+    ld-options: -static -pthread
+    dependencies:
+    - lessav
+    
+
+tests:
+  lessav-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - lessav
