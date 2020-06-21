@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 7da3af890c53b72d772e8493fbd87798664998098b6bd8a81701c53b0766df57
+-- hash: 2b659e645d568b478a04a8112307d17262453643a93654cc6307789c46861c59
 
 name:           lessav
 version:        0.1.0.0
@@ -27,7 +27,6 @@ source-repository head
 
 library
   exposed-modules:
-      Async
       Av
       Levenshtein
       Lib
@@ -36,16 +35,12 @@ library
   hs-source-dirs:
       src
   build-depends:
-      SafeSemaphore
-    , aeson
+      aeson
+    , aeson-pretty
     , array
-    , async
-    , async-pool
     , base >=4.7 && <5
     , broadcast-chan
     , bytestring
-    , deepseq
-    , deepseq-generics
     , directory
     , filepath
     , http-conduit
@@ -67,16 +62,12 @@ executable lessav-exe
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      SafeSemaphore
-    , aeson
+      aeson
+    , aeson-pretty
     , array
-    , async
-    , async-pool
     , base >=4.7 && <5
     , broadcast-chan
     , bytestring
-    , deepseq
-    , deepseq-generics
     , directory
     , filepath
     , http-conduit
@@ -101,16 +92,12 @@ executable lessav-static
   cc-options: -static
   ld-options: -static -pthread
   build-depends:
-      SafeSemaphore
-    , aeson
+      aeson
+    , aeson-pretty
     , array
-    , async
-    , async-pool
     , base >=4.7 && <5
     , broadcast-chan
     , bytestring
-    , deepseq
-    , deepseq-generics
     , directory
     , filepath
     , http-conduit
@@ -134,16 +121,12 @@ test-suite lessav-test
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      SafeSemaphore
-    , aeson
+      aeson
+    , aeson-pretty
     , array
-    , async
-    , async-pool
     , base >=4.7 && <5
     , broadcast-chan
     , bytestring
-    , deepseq
-    , deepseq-generics
     , directory
     , filepath
     , http-conduit

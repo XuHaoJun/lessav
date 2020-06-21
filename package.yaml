@@ -31,16 +31,12 @@ dependencies:
 - text
 - split
 - filepath
-- async
-- async-pool
-- SafeSemaphore
 - aeson
+- aeson-pretty
 - array
 - immortal-queue
 - stm
 - broadcast-chan
-- deepseq
-- deepseq-generics
 
 library:
   source-dirs: src

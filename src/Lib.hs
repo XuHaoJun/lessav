@@ -1,7 +1,6 @@
 #!/usr/bin/env stack
 -- stack script --resolver lts-16.0
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE BangPatterns #-}
 
 module Lib where
     -- ( 
@@ -14,7 +13,8 @@ import qualified Data.ByteString.Char8 as S8
 import qualified Data.String.UTF8 as U8
 import qualified Data.Text as T
 import qualified Data.Aeson as JSON
-import Data.Text.Encoding
+import Data.Aeson.Encode.Pretty (encodePretty)
+import Data.Text.Encoding (decodeUtf8)
 import Network.HTTP.Simple
 import Data.Char
 import Text.HTML.TagSoup
@@ -26,9 +26,7 @@ import Data.List.Split (splitWhen)
 import Data.List (findIndex, insert, intercalate, groupBy, sortBy)
 import System.FilePath
 import Data.Maybe (catMaybes)
-import Control.Concurrent (threadDelay, yield)
-import qualified Control.Concurrent.Async.Pool as AsyncPool
-import qualified Control.Concurrent.Async as Async
+import Control.Concurrent (threadDelay)
 
 import qualified BroadcastChan as BChan
 
@@ -37,10 +35,6 @@ import Control.Concurrent.STM.TQueue
 import Control.Exception (Exception)
 import Control.Immortal.Queue
 
-import Control.DeepSeq (force, rnf, deepseq)
-import Control.Exception (evaluate)
-
-import Async (mapPool)
 import Levenshtein (lev, levp)
 import Av
 
@@ -75,7 +69,6 @@ dmmFindOne avId = do
     response <- httpLBS req
     let code = (getResponseStatusCode response)
     let body = getResponseBody response
-    putStrLn $ "[" ++ avId ++ "]" ++ " dmmFindOne code: " ++ show code
     return $ case code of
                  200 -> 
                      let link = L8.unpack $ findFirstLink $ parseTags body
@@ -139,7 +132,6 @@ dmmGetAvByUrl url = do
     req <- parseRequest url
     response <- httpLBS req
     let code = (getResponseStatusCode response)
-    putStrLn $ "dmmGetAvByUrl code: " ++ show code
     case code of
         200 -> 
             let 
@@ -168,22 +160,10 @@ dmmGetAv avId = do
     case maybeAvUrl of
         Nothing -> return Nothing
         Just avUrl -> (do
-            !maybeAv <- dmmGetAvByUrl avUrl
+            maybeAv <- dmmGetAvByUrl avUrl
             return $ case maybeAv of
                 Nothing -> Nothing
                 Just av -> Just $ (setAvId avId av))
-
-dmmGetAv2 :: String -> IO(Maybe Av)
-dmmGetAv2 avId = do
-    maybeAvUrl <- dmmFindOne avId
-    result <- (case maybeAvUrl of
-            Nothing -> return Nothing
-            Just avUrl -> (do
-                !maybeAv <- dmmGetAvByUrl avUrl
-                return $ case maybeAv of
-                    Nothing -> Nothing
-                    Just av -> Just $ (setAvId avId av)))
-    return $ deepseq maybeAvUrl result
 
 getAvIdFromDir :: FilePath -> IO [(String, FilePath)]
 getAvIdFromDir dir  = do
@@ -199,7 +179,7 @@ getAvIdFromDir dir  = do
                                  let avIdMatch = (f =~ avRegex :: String)
                                  in if null avIdMatch
                                     then xs
-                                    else insert (toLower avIdMatch, (dir </> f)) xs)
+                                    else insert ((toLower' avIdMatch), (dir </> f)) xs)
                             [] fs
 
 outPutDir :: FilePath
@@ -209,123 +189,12 @@ createOutputDir :: IO ()
 createOutputDir = do 
     createDirectoryIfMissing True outPutDir
 
-numMaxConcurrentThreads :: Int
-numMaxConcurrentThreads = 3
-
-createAvTree2 :: IO ()
-createAvTree2 = do
-    _ <- createOutputDir
-    currentDir <- getCurrentDirectory
-    avIdWithFilePathPairs <- getAvIdFromDir currentDir
-    let avIds = map fst avIdWithFilePathPairs
-    let avFilePaths = map snd avIdWithFilePathPairs
-    maybeAvsNoPath <- mapPool numMaxConcurrentThreads 
-                              (\avId -> (do
-                                av <- dmmGetAv avId
-                                _ <- threadDelay 1000000
-                                return av
-                              ))
-                              avIds
-    let avsNoPath = catMaybes maybeAvsNoPath
-    let avs = zipWith (\av f -> setFilePath f av) avsNoPath avFilePaths 
-    -- TODO
-    -- refactor that shit
-    _ <- sequence_ $ map (\av -> sequence_ $
-                        map (\actor ->
-                                (do 
-                                    _ <- createDirectoryIfMissing True (outPutDir </> "actors" </> actor)
-                                    _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "actors" </> actor)
-                                    _ <- sequence_ $ map (\tag -> (do 
-                                                                      _ <- createDirectoryIfMissing True (outPutDir </> "actors" </> actor </> "tags" </> tag)
-                                                                      _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "actors" </> actor </> "tags" </> tag)
-                                                                      return ()
-                                        )) (getTags av)
-                                    return ())
-                            ) (getActors av)
-                        ) avs
-    _ <- sequence_ $ map (\av -> sequence_ $
-                        map (\tag ->
-                                (do 
-                                    _ <- createDirectoryIfMissing True (outPutDir </> "tags" </> tag)
-                                    _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "tags" </> tag)
-                                    _ <- sequence_ $ map (\actor -> (do 
-                                                                      _ <- createDirectoryIfMissing True (outPutDir </> "tags" </> tag </> "actors" </> actor)
-                                                                      _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "tags" </> tag </> "actors" </> actor)
-                                                                      return ()
-                                        )) (getActors av)
-                                    return ())
-                            ) (getTags av)
-                        ) avs
-    -- _ <- sequence_ $ concat $ map (\av -> map (\actor -> createDirectoryIfMissing True (outPutDir </> "actors" </> actor)) (getActors av)) avs
-    -- _ <- sequence_ $ concat $ map (\av -> map (\actor -> createShortcut (getFilePath av) (outPutDir </> "actors" </> actor)) (getActors av)) avs
-    -- _ <- sequence_ $ concat $ map (\av -> map (\tag -> createDirectoryIfMissing True (outPutDir </> "tags" </> tag)) (getTags av)) avs
-    -- _ <- sequence_ $ concat $ map (\av -> map (\tag -> createShortcut (getFilePath av) (outPutDir </> "tags" </> tag)) (getTags av)) avs
-    print avs
-    where
-        groups :: [String]
-        groups = ["actors", "tags"] 
-
-partition :: Int -> [a] -> [[a]]
-partition n xs = partition' n xs []
-  where
-    partition' _ [] acc = reverse acc
-    partition' n xs acc = partition' n (drop n xs) ((take n xs) : acc)
-
-emptyMaybeAvs :: [IO(Maybe Av)]
-emptyMaybeAvs = []
-
 trim :: String -> String
 trim = f . f
    where f = reverse . dropWhile isSpace
 
-createAvTree :: IO ([Av])
-createAvTree = do
-    _ <- createOutputDir
-    currentDir <- getCurrentDirectory
-    avIdWithFilePathPairs <- getAvIdFromDir currentDir
-
-    ioMaybeAvs <- AsyncPool.withTaskGroup 2 $ \g -> 
-        (do
-            as <- sequence $
-                (map 
-                     (\idFilePair -> 
-                             (do 
-                                let avId = fst idFilePair
-                                let avFilePath = snd idFilePair
-                                a1 <- AsyncPool.async g $ createAvTreeHelper currentDir idFilePair
-                                return a1
-                             )
-                      )
-                avIdWithFilePathPairs)
-            result <- sequence $ map AsyncPool.wait as
-            return result
-            -- taskResult <- (AsyncPool.mapConcurrently g (\idFilePair -> 
-            --             (do 
-            --                 let avId = fst idFilePair
-            --                 let avFilePath = snd idFilePair
-            --                 return $ createAvTreeHelper currentDir idFilePair
-            --             )
-            --                                               )
-            --                   avIdWithFilePathPairs
-            --                ) 
-            -- return taskResult
-        )
-    -- ioMaybeAvs' <- ioMaybeAvs
-    -- maybeAvs <- sequence ioMaybeAvs
-    -- let avs = catMaybes ioMaybeAvs
-    -- let avs = catMaybes ioMaybeAvs
-    -- maybeAvs <- ioMaybeAvs
-    -- maybeAvs <- concat ioMaybeAvs
-    -- let maybeAvs' = map (\pair -> do next <- sequence pair; return next; ) maybeAvs 
-    -- maybeAvs'' <- sequence $ concat maybeAvs
-    -- let maybeAvs = concat $ map (\xs -> sequence xs) ioMaybeAvs
-    let avs = catMaybes ioMaybeAvs
-    _ <- createJpDisplayGroup avs
-    return avs 
-
-
 data AvTask 
-    = CreateAvTask(BChan.BroadcastChan BChan.In (Maybe Av), FilePath, String, FilePath)
+    = CreateAvTask (BChan.BroadcastChan BChan.In (Maybe Av), FilePath, String, FilePath)
 
 queueConfig :: TQueue AvTask -> ImmortalQueue AvTask
 queueConfig queue =
@@ -341,8 +210,8 @@ queueConfig queue =
     performTask :: AvTask -> IO ()
     performTask t = case t of
         CreateAvTask (inChan, currentDir, avId, filePath) -> do
-            maybeAv <- createAvTreeHelper2 currentDir (avId, filePath)
-            surcess <- maybeAv `deepseq` BChan.writeBChan inChan maybeAv
+            maybeAv <- createAvTreeHelper currentDir (avId, filePath)
+            surcess <- BChan.writeBChan inChan maybeAv
             return ()
 
     printError :: Exception e => AvTask -> e -> IO ()
@@ -352,23 +221,32 @@ queueConfig queue =
                     "CreateAv"
         in  putStrLn $ "Task `" ++ description ++ "` failed with: " ++ show err
 
-createAvTree4 :: IO ()
-createAvTree4 = do
+createAvTree :: IO([Av])
+createAvTree = createAvTree' []
+
+createAvTree' :: [Av] -> IO([Av])
+createAvTree' dbAvs = do
     _ <- createOutputDir
     currentDir <- getCurrentDirectory
-    avIdWithFilePathPairs <- getAvIdFromDir currentDir
+    _avIdWithFilePathPairs <- getAvIdFromDir currentDir
+    let excludeFilePaths = map getFilePath dbAvs
+    let avIdWithFilePathPairs = filter (\pair ->
+                                            (all
+                                                (\exclude -> not $ equalFilePath exclude (snd pair))
+                                                excludeFilePaths)
+                                       )
+                                       _avIdWithFilePathPairs
     queue <- newTQueueIO
     workers <- processImmortalQueue $ queueConfig queue
     inChan <- BChan.newBroadcastChan
     outChan <- BChan.newBChanListener inChan
-    let !inputs = (map (\pair -> (inChan, currentDir, fst pair, snd pair)) avIdWithFilePathPairs)
-    -- _ <- atomically $ mapM (writeTQueue queue . CreateAvTask) input
-    -- _ <- atomically $ mapM (writeTQueue queue . CreateAv) (map (\pair -> (inChan, currentDir, fst pair, snd pair)) avIdWithFilePathPairs)
-    -- _ <- closeImmortalQueue workers
+    let inputs = (map (\pair -> (inChan, currentDir, fst pair, snd pair)) avIdWithFilePathPairs)
     maybeAvs <- loop queue outChan inputs [] (length avIdWithFilePathPairs) 0
-    let !avs = catMaybes maybeAvs
-    avs `deepseq` createJpDisplayGroup avs
-    return ()
+    let avs = catMaybes maybeAvs
+    putStrLn $ intercalate "," $ map getAvId avs
+    createJpDisplayGroup avs
+    closeImmortalQueue workers
+    return avs
     where
         -- TODO
         -- Add timeout control
@@ -382,7 +260,7 @@ createAvTree4 = do
                         Nothing -> return ()
                         Just input -> atomically $ (writeTQueue queue . CreateAvTask) input
                      )
-                _ <- threadDelay 3000000
+                _ <- threadDelay 5000000
                 chanData <- BChan.readBChan outChan
                 case chanData of
                     Nothing -> loop queue outChan (tail inputs) avs targetLength (times + 1)
@@ -391,7 +269,7 @@ createAvTree4 = do
                             Nothing -> loop queue outChan (tail inputs) (Nothing : avs) targetLength (times + 1)
                             Just av -> 
                                     if (length avs) + 1 >= targetLength
-                                        then return avs
+                                        then return (Just av : avs)
                                         else loop queue outChan (tail inputs) (Just av : avs) targetLength (times + 1)
             )
                )
@@ -418,48 +296,6 @@ createJpDisplayGroup avs = do
     return ()
 
 
-createAvTreeHelper2 :: FilePath -> (String, FilePath) -> IO (Maybe Av)
-createAvTreeHelper2 currentDir idFilePair = 
-    (do 
-        let avId = fst idFilePair
-        let avFilePath = snd idFilePair
-        maybeAv <-  dmmGetAv2 avId
-        result <- (case maybeAv of
-                   Nothing -> return Nothing
-                   Just _av -> (do
-                                   let !av = setFilePath avFilePath _av
-                                   putStrLn $ "[" ++ (getAvId av) ++ "]" ++ " " ++ (getJpDisplay av)
-                                   !_ <- sequence_ $ map (\actor ->
-                                                               (do 
-                                                                   _ <- createDirectoryIfMissing True (outPutDir </> "actors" </> actor)
-                                                                   _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "actors" </> actor)
-                                                                   _ <- sequence_ $ map (\tag -> (do 
-                                                                                                       _ <- createDirectoryIfMissing True (outPutDir </> "actors" </> actor </> "tags" </> tag)
-                                                                                                       _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "actors" </> actor </> "tags" </> tag)
-                                                                                                       return ()
-                                                                       )) (getTags av)
-                                                                   return ())
-                                                               ) (getActors av)
-
-
-                                   _ <- sequence_ $ map (\tag ->
-                                                              (do 
-                                                                  _ <- createDirectoryIfMissing True (outPutDir </> "tags" </> tag)
-                                                                  _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "tags" </> tag)
-                                                                  _ <- sequence_ $ map (\actor -> (do 
-                                                                                                    _ <- createDirectoryIfMissing True (outPutDir </> "tags" </> tag </> "actors" </> actor)
-                                                                                                    _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "tags" </> tag </> "actors" </> actor)
-                                                                                                    return ()
-                                                                      )) (getActors av)
-                                                                  return ())
-                                                               ) (getTags av)
-
-                                   return $ Just av
-                               )
-                    )
-        return $ deepseq maybeAv result
-    )
-
 createAvTreeHelper :: FilePath -> (String, FilePath) -> IO (Maybe Av)
 createAvTreeHelper currentDir idFilePair = 
     (do 
@@ -469,9 +305,9 @@ createAvTreeHelper currentDir idFilePair =
         result <- (case maybeAv of
                    Nothing -> return Nothing
                    Just _av -> (do
-                                   let !av = setFilePath avFilePath _av
+                                   let av = setFilePath avFilePath _av
                                    putStrLn $ "[" ++ (getAvId av) ++ "]" ++ " " ++ (getJpDisplay av)
-                                   !_ <- sequence_ $ map (\actor ->
+                                   _ <- sequence_ $ map (\actor ->
                                                                (do 
                                                                    _ <- createDirectoryIfMissing True (outPutDir </> "actors" </> actor)
                                                                    _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "actors" </> actor)
@@ -502,76 +338,6 @@ createAvTreeHelper currentDir idFilePair =
         return result
     )
 
-createAvTree3 :: IO [Av]
-createAvTree3 = do
-    _ <- createOutputDir
-    currentDir <- getCurrentDirectory
-    avIdWithFilePathPairs <- getAvIdFromDir currentDir
-    -- TODO
-    -- refactor that shit
-    maybeAvs <- mapPool numMaxConcurrentThreads 
-                 (\idFilePair -> 
-                            (do 
-                                let avId = fst idFilePair
-                                let avFilePath = snd idFilePair
-                                !maybeAv <- dmmGetAv avId
-                                !result <- (case maybeAv of
-                                           Nothing -> return Nothing
-                                           Just _av -> (do
-                                                           let av = setFilePath avFilePath _av
-                                                           putStrLn $ "[" ++ (getAvId av) ++ "]" ++ " " ++ (getJpDisplay av)
-                                                           !_ <- sequence_ $ map (\actor ->
-                                                                                       (do 
-                                                                                           _ <- createDirectoryIfMissing True (outPutDir </> "actors" </> actor)
-                                                                                           _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "actors" </> actor)
-                                                                                           _ <- sequence_ $ map (\tag -> (do 
-                                                                                                                               _ <- createDirectoryIfMissing True (outPutDir </> "actors" </> actor </> "tags" </> tag)
-                                                                                                                               _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "actors" </> actor </> "tags" </> tag)
-                                                                                                                               return ()
-                                                                                               )) (getTags av)
-                                                                                           return ())
-                                                                                       ) (getActors av)
-
-
-                                                           !_ <- sequence_ $ map (\tag ->
-                                                                                      (do 
-                                                                                          _ <- createDirectoryIfMissing True (outPutDir </> "tags" </> tag)
-                                                                                          _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "tags" </> tag)
-                                                                                          _ <- sequence_ $ map (\actor -> (do 
-                                                                                                                            _ <- createDirectoryIfMissing True (outPutDir </> "tags" </> tag </> "actors" </> actor)
-                                                                                                                            _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "tags" </> tag </> "actors" </> actor)
-                                                                                                                            return ()
-                                                                                              )) (getActors av)
-                                                                                          return ())
-                                                                                       ) (getTags av)
-
-                                                           return $ Just av
-                                                       )
-                                            )
-                                return result
-
-                            )
-                 )
-                 avIdWithFilePathPairs
-    let avs = catMaybes maybeAvs
-    let jpDisplayGroup = filter (\group -> (length group) > 1) $
-                         groupBy (\x y -> levp (getJpDisplay x) (getJpDisplay y) >= 0.5)
-                                 (sortBy (\x y -> compare (getJpDisplay x) (getJpDisplay y)) avs)
-    _ <- sequence_ $ map (\group -> 
-                            (do
-                                let headAv = head group
-                                let groupDir = outPutDir </> "title-group" </> take 25 (getJpDisplay headAv)
-                                _ <- createDirectoryIfMissing True groupDir
-                                _ <- sequence_ $ map (\av -> 
-                                                        (do
-                                                            _ <- createShortcut (getFilePath av) groupDir
-                                                            return ()
-                                                        )
-                                                     ) group
-                                return ()
-                            )
-                         ) jpDisplayGroup
-    return avs 
 
 defaultDbFilePath :: FilePath
 defaultDbFilePath = (outPutDir </> "av-db.json")
@@ -579,13 +345,17 @@ defaultDbFilePath = (outPutDir </> "av-db.json")
 dumpDb :: [Av] -> IO ()
 dumpDb avs = do
     if not (null avs)
-        then L8.writeFile defaultDbFilePath (JSON.encode avs)
+        then L8.writeFile defaultDbFilePath (encodePretty avs)
         else return ()
 
 getAvsFromDb :: IO (Maybe [Av])
 getAvsFromDb = do
-    s <- L8.readFile defaultDbFilePath 
-    return (JSON.decode s)
+    found <- doesFileExist defaultDbFilePath
+    if found
+        then 
+            L8.readFile defaultDbFilePath >>= (\s -> return (JSON.decode s))
+        else
+            return Nothing
 
 createCsv :: [Av] -> IO()
 createCsv avs = do

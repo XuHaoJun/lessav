@@ -1,12 +1,15 @@
 module Main where
 
 import Lib
+import qualified Av as Av
 
 main :: IO ()
 main = do 
-  -- putStrLn "Start scaning current directory ......"
-  -- avs <- createAvTree
-  -- _ <- dumpDb avs
-  -- return ()
-  _ <- createAvTree4
+  maybe'avs <- getAvsFromDb
+  let dbAvs = (case maybe'avs of
+                Nothing -> []
+                Just dbAvs ->  dbAvs)
+  avs <- createAvTree' dbAvs
+  dumpDb avs
+  createCsv avs
   return ()

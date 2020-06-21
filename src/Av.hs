@@ -3,8 +3,6 @@
 module Av where
 
 import GHC.Generics (Generic)
-import Control.DeepSeq.Generics (genericRnf)
-import Control.DeepSeq
 import Data.Aeson
 
 data Av = Av { 
@@ -17,8 +15,6 @@ data Av = Av {
     tags :: [String] 
 } deriving (Generic, Show)
 
-
-instance NFData Av where rnf = genericRnf
 
 instance ToJSON Av where
     toEncoding = genericToEncoding defaultOptions
