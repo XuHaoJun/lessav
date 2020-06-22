@@ -27,6 +27,7 @@ import Data.List (findIndex, insert, intercalate, groupBy, sortBy)
 import System.FilePath
 import Data.Maybe (catMaybes)
 import Control.Concurrent (threadDelay)
+import Numeric.Natural
 
 import qualified BroadcastChan as BChan
 
@@ -165,18 +166,22 @@ dmmGetAv avId = do
                 Nothing -> Nothing
                 Just av -> Just $ (setAvId avId av))
 
-getAvIdFromDir :: FilePath -> IO [(String, FilePath)]
-getAvIdFromDir dir  = do
+getAvIdsFromDir :: FilePath -> IO [(String, FilePath)]
+getAvIdsFromDir dir  = do
     filePaths <- getDirectoryContents dir
     let onlyFiles = filter hasExtension filePaths
     return $ getIdPathPair onlyFiles
     where
+        -- TODO
+        -- do'nt strict avRegex
         avRegex :: String
-        avRegex = "^([a-zA-Z]+-[0-9]+)" 
+        avRegex = "^([a-zA-Z]+-[0-9]+)([a-zA-Z0-9\\.\\-])*$" 
+        getAvIdFromMatch :: (String, String, String, [String]) -> String
+        getAvIdFromMatch (_, _, _, submatchs) = if null submatchs then "" else head submatchs
         getIdPathPair :: [FilePath] -> [(String, FilePath)]
         getIdPathPair fs = foldl 
                             (\xs f ->
-                                 let avIdMatch = (f =~ avRegex :: String)
+                                 let avIdMatch = getAvIdFromMatch (f =~ avRegex :: (String, String, String, [String]))
                                  in if null avIdMatch
                                     then xs
                                     else insert ((toLower' avIdMatch), (dir </> f)) xs)
@@ -196,10 +201,10 @@ trim = f . f
 data AvTask 
     = CreateAvTask (BChan.BroadcastChan BChan.In (Maybe Av), FilePath, String, FilePath)
 
-queueConfig :: TQueue AvTask -> ImmortalQueue AvTask
-queueConfig queue =
+queueConfig :: TQueue AvTask -> Natural -> ImmortalQueue AvTask
+queueConfig queue numThread =
     ImmortalQueue
-        { qThreadCount = 2
+        { qThreadCount = numThread
         , qPollWorkerTime = 1000
         , qPop = atomically $ readTQueue queue
         , qPush = atomically . writeTQueue queue
@@ -222,13 +227,13 @@ queueConfig queue =
         in  putStrLn $ "Task `" ++ description ++ "` failed with: " ++ show err
 
 createAvTree :: IO([Av])
-createAvTree = createAvTree' []
+createAvTree = createAvTree' [] 2 5000000
 
-createAvTree' :: [Av] -> IO([Av])
-createAvTree' dbAvs = do
+createAvTree' :: [Av] -> Natural -> Int -> IO([Av])
+createAvTree' dbAvs numThread taskDelay = do
     _ <- createOutputDir
     currentDir <- getCurrentDirectory
-    _avIdWithFilePathPairs <- getAvIdFromDir currentDir
+    _avIdWithFilePathPairs <- getAvIdsFromDir currentDir
     let excludeFilePaths = map getFilePath dbAvs
     let avIdWithFilePathPairs = filter (\pair ->
                                             (all
@@ -237,7 +242,7 @@ createAvTree' dbAvs = do
                                        )
                                        _avIdWithFilePathPairs
     queue <- newTQueueIO
-    workers <- processImmortalQueue $ queueConfig queue
+    workers <- processImmortalQueue $ queueConfig queue numThread
     inChan <- BChan.newBroadcastChan
     outChan <- BChan.newBChanListener inChan
     let inputs = (map (\pair -> (inChan, currentDir, fst pair, snd pair)) avIdWithFilePathPairs)
@@ -246,13 +251,14 @@ createAvTree' dbAvs = do
     putStrLn $ intercalate "," $ map getAvId avs
     createJpDisplayGroup avs
     closeImmortalQueue workers
-    return avs
+    return $ dbAvs ++ avs
     where
         -- TODO
         -- Add timeout control
         -- loop :: BChan.BroadcastChan BChan.Out (Maybe Av) ->
         --         [(BChan.BroadcastChan BChan.In (Maybe Av), FilePath, String, FilePath)] ->
         --         [Maybe Av] -> Int -> Int -> IO ([Maybe Av])
+        tail' xs = if null xs then [] else tail xs
         loop = (\queue outChan inputs avs targetLength times -> 
             (do
                 let input = if null inputs then Nothing else Just $ head inputs
@@ -260,17 +266,20 @@ createAvTree' dbAvs = do
                         Nothing -> return ()
                         Just input -> atomically $ (writeTQueue queue . CreateAvTask) input
                      )
-                _ <- threadDelay 5000000
+                _ <- threadDelay taskDelay
                 chanData <- BChan.readBChan outChan
                 case chanData of
-                    Nothing -> loop queue outChan (tail inputs) avs targetLength (times + 1)
+                    Nothing -> loop queue outChan (tail' inputs) avs targetLength (times + 1)
                     Just maybeAv -> 
                         case maybeAv of
-                            Nothing -> loop queue outChan (tail inputs) (Nothing : avs) targetLength (times + 1)
+                            Nothing -> 
+                                if (length avs) + 1 >= targetLength
+                                    then return (Nothing : avs)
+                                    else loop queue outChan (tail' inputs) (Nothing : avs) targetLength (times + 1)
                             Just av -> 
                                     if (length avs) + 1 >= targetLength
                                         then return (Just av : avs)
-                                        else loop queue outChan (tail inputs) (Just av : avs) targetLength (times + 1)
+                                        else loop queue outChan (tail' inputs) (Just av : avs) targetLength (times + 1)
             )
                )
 
@@ -310,7 +319,7 @@ createAvTreeHelper currentDir idFilePair =
                                    _ <- sequence_ $ map (\actor ->
                                                                (do 
                                                                    _ <- createDirectoryIfMissing True (outPutDir </> "actors" </> actor)
-                                                                   _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "actors" </> actor)
+                                                                   _ <- createShortcut (getFilePath av) (outPutDir </> "actors" </> actor)
                                                                    _ <- sequence_ $ map (\tag -> (do 
                                                                                                        _ <- createDirectoryIfMissing True (outPutDir </> "actors" </> actor </> "tags" </> tag)
                                                                                                        _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "actors" </> actor </> "tags" </> tag)
@@ -323,7 +332,7 @@ createAvTreeHelper currentDir idFilePair =
                                    _ <- sequence_ $ map (\tag ->
                                                               (do 
                                                                   _ <- createDirectoryIfMissing True (outPutDir </> "tags" </> tag)
-                                                                  _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "tags" </> tag)
+                                                                  _ <- createShortcut (getFilePath av) (outPutDir </> "tags" </> tag)
                                                                   _ <- sequence_ $ map (\actor -> (do 
                                                                                                     _ <- createDirectoryIfMissing True (outPutDir </> "tags" </> tag </> "actors" </> actor)
                                                                                                     _ <- createShortcut (getFilePath av) (currentDir </> outPutDir </> "tags" </> tag </> "actors" </> actor)
@@ -370,7 +379,6 @@ createCsv avs = do
 createShortcut :: FilePath -> FilePath -> IO ()
 createShortcut targetPath shortcutDir = do
     _ <- runCommand command
-    threadDelay 100000
     return ()
     where powershellCmd :: String
           powershellCmd = "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile"

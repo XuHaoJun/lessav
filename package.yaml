@@ -37,6 +37,7 @@ dependencies:
 - immortal-queue
 - stm
 - broadcast-chan
+- optparse-applicative
 
 library:
   source-dirs: src

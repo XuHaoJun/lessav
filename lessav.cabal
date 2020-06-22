@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 2b659e645d568b478a04a8112307d17262453643a93654cc6307789c46861c59
+-- hash: f079dc816706767fe2a5c1c4671ed5eef435e170d257d5d264db0bf04016ad84
 
 name:           lessav
 version:        0.1.0.0
@@ -45,6 +45,7 @@ library
     , filepath
     , http-conduit
     , immortal-queue
+    , optparse-applicative
     , process
     , regex-tdfa
     , split
@@ -73,6 +74,7 @@ executable lessav-exe
     , http-conduit
     , immortal-queue
     , lessav
+    , optparse-applicative
     , process
     , regex-tdfa
     , split
@@ -103,6 +105,7 @@ executable lessav-static
     , http-conduit
     , immortal-queue
     , lessav
+    , optparse-applicative
     , process
     , regex-tdfa
     , split
@@ -132,6 +135,7 @@ test-suite lessav-test
     , http-conduit
     , immortal-queue
     , lessav
+    , optparse-applicative
     , process
     , regex-tdfa
     , split
