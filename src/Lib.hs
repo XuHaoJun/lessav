@@ -205,7 +205,7 @@ queueConfig :: TQueue AvTask -> Natural -> ImmortalQueue AvTask
 queueConfig queue numThread =
     ImmortalQueue
         { qThreadCount = numThread
-        , qPollWorkerTime = 1000
+        , qPollWorkerTime = 100
         , qPop = atomically $ readTQueue queue
         , qPush = atomically . writeTQueue queue
         , qHandler = performTask
@@ -216,7 +216,7 @@ queueConfig queue numThread =
     performTask t = case t of
         CreateAvTask (inChan, currentDir, avId, filePath) -> do
             maybeAv <- createAvTreeHelper currentDir (avId, filePath)
-            surcess <- BChan.writeBChan inChan maybeAv
+            sucess <- BChan.writeBChan inChan maybeAv
             return ()
 
     printError :: Exception e => AvTask -> e -> IO ()
@@ -375,7 +375,7 @@ createCsv avs = do
         csvContent = firstRaw ++ "\n" ++ (concat (map (\av -> (printf "%s,%s,%s\n" (getAvId av) (getJpDisplay av) (intercalate "," (getActors av)))) avs))
 
 -- TODO
--- Fix large memory used because fork too more process.
+-- Fix large memory used because fork too many process.
 createShortcut :: FilePath -> FilePath -> IO ()
 createShortcut targetPath shortcutDir = do
     _ <- runCommand command

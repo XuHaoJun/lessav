@@ -27,7 +27,7 @@ sample = LessavOpts
          <> showDefault
          <> value 500000
          <> metavar "INT"
-         <> help "delay(milliseond) for push task to workers, no check previous pushed task status. one task has 2 http request and create shortcuts" )
+         <> help "delay(microsecond) for push task to workers, no check previous pushed task status. one task has 2 http request and create shortcuts" )
 
 main :: IO ()
 main = do 
